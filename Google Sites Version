@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Beat Arrows — WebGL Rhythm Game (WebGL 1.0)</title>
+<style>
+html,body{
+    margin:0;padding:0;height:100%;
+    background:#050712;color:#fff;
+    font-family:system-ui,sans-serif;
+    overflow:hidden;
+}
+#canvas{position:fixed;inset:0}
+.panel{
+    background:rgba(0,0,0,.45);
+    backdrop-filter:blur(6px);
+    border-radius:14px;
+    border:1px solid rgba(255,255,255,.08);
+}
+#top{
+    position:fixed;top:10px;left:10px;right:10px;
+    display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+    padding:10px;z-index:5;
+}
+#hud{
+    position:fixed;bottom:10px;left:10px;right:10px;
+    display:flex;justify-content:space-between;align-items:center;
+    padding:10px;z-index:5;
+}
+button{
+    border:0;border-radius:10px;padding:8px 14px;
+    font-weight:700;
+    background:linear-gradient(#3b7bff,#2457d6);color:#fff;
+    cursor:pointer;
+}
+button.secondary{background:#2a2e3d}
+button:disabled{opacity:.5;cursor:default}
+select,input[type=range]{
+    background:#121421;color:#fff;
+    border:1px solid #2c3558;border-radius:8px;padding:6px;
+}
+#judge{
+    position:fixed;left:50%;top:45%;
+    transform:translate(-50%,-50%);
+    font-size:32px;font-weight:900;
+    padding:12px 18px;border-radius:16px;
+    background:rgba(0,0,0,.6);
+    opacity:0;transition:.15s;pointer-events:none;
+    z-index:5;
+}
+#keys{
+    position:fixed;bottom:90px;left:50%;
+    transform:translateX(-50%);
+    display:flex;gap:16px;z-index:5;
+}
+.key{
+    width:52px;height:52px;
+    border-radius:12px;
+    background:#1b2138;
+    border:2px solid #2d3b66;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:900;
+    transition:.08s;
+}
+.key.active{
+    background:#3b7bff;border-color:#9ec5ff;
+    box-shadow:0 0 18px #7db1ff;
+}
+#health{width:220px;height:10px;background:#231b2f;border-radius:8px;border:1px solid #463b66;overflow:hidden}
+#health>div{height:100%;background:linear-gradient(90deg,#6eff9c,#4bd1ff)}
+#results{
+    position:fixed;top:50%;left:50%;
+    transform:translate(-50%,-50%);
+    padding:18px 22px;display:none;
+    flex-direction:column;gap:8px;align-items:center;z-index:6;
+}
+#results h2{margin:0 0 4px 0}
+#overlay-dim{
+    position:fixed;inset:0;background:rgba(0,0,0,.45);
+    display:none;z-index:5;
+}
+.small-label{font-size:12px;opacity:.7;margin-right:4px}
+@media (max-width:768px){
+    #keys{bottom:120px}
+    #hud{flex-direction:column;gap:6px;align-items:flex-start}
+}
+/* FPS counter styling */
+#stats {
+    position: fixed !important;
+    top: 0px;
+    left: 0px;
+    z-index: 1000;
+}
+</style>
+</head>
+<body>
+<div id="canvas"></div>
+
+<div id="top" class="panel">
+    <span class="small-label">Song</span>
+    <select id="level"></select>
+
+    <span class="small-label">Difficulty</span>
+    <select id="difficulty">
+        <option value="easy">Easy</option>
+        <option value="normal">Normal</option>
+        <option value="hard">Hard</option>
+    </select>
+
+    <span class="small-label">Env</span>
+    <select id="environment">
+        <option value="neon">Neon Highway</option>
+        <option value="stellar">Stellar Grid</option>
+    </select>
+
+    <span class="small-label">Graphics</span>
+    <select id="graphics">
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high" selected>High</option>
+    </select>
+
+    <button id="start">Start</button>
+    <button id="pause" class="secondary" disabled>Pause</button>
+    <button id="restart" class="secondary" disabled>Restart</button>
+
+    <span class="small-label">Vol</span>
+    <input id="vol" type="range" min="0" max="1" step="0.01" value="0.9">
+</div>
+
+<div id="hud" class="panel">
+    <div id="score">Score 0</div>
+    <div id="combo">Combo 0</div>
+    <div id="acc">Acc 100%</div>
+    <div id="health"><div></div></div>
+</div>
+
+<div id="judge">READY</div>
+
+<div id="keys">
+    <div class="key" id="kA">A</div>
+    <div class="key" id="kS">S</div>
+    <div class="key" id="kD">D</div>
+    <div class="key" id="kF">F</div>
+</div>
+
+<div id="overlay-dim"></div>
+
+<div id="results" class="panel">
+    <h2 id="res-title">RESULT</h2>
+    <div id="res-song"></div>
+    <div id="res-diff"></div>
+    <div id="res-score"></div>
+    <div id="res-acc"></div>
+    <div id="res-best-combo"></div>
+    <div id="res-rank"></div>
+    <button id="res-restart">Retry</button>
+</div>
+
+<script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+
+<script src="https://unpkg.com/stats.js@0.17.0/build/stats.min.js"></script>
+
+<script>
+(()=>{
+'use strict';
+
+/* ================= CONSTANTS ================= */
+const LANES = ['A','S','D','F'];
+const X = {A:-6,S:-2,D:2,F:6};
+const COLORS = {A:0xff5b5b,S:0xffc857,D:0x57ffd1,F:0x6ea8ff};
+const SPAWN = -80, TARGET = -5, APPROACH = 1.8;
+
+const WINDOWS = {
+    perfect: 0.045,
+    great:   0.090,
+    good:    0.150,
+    miss:    0.210
+};
+
+const LEVELS = [
+    {
+        name:'Intro Groove',
+        bpm: 100,
+        difficulties:{
+            easy:{
+                audio:null,
+                offset:0.00,
+                notes:generatePattern(100, 32, 0.5)
+            },
+            normal:{
+                audio:null,
+                offset:0.00,
+                notes:generatePattern(100, 56, 0.5)
+            },
+            hard:{
+                audio:null,
+                offset:0.00,
+                notes:generatePattern(100, 80, 0.25)
+            }
+        }
+    },
+    {
+        name:'Neon Walk',
+        bpm:120,
+        difficulties:{
+            easy:{
+                audio:null,
+                offset:0.00,
+                notes:generatePattern(120, 48, 0.5)
+            },
+            normal:{
+                audio:null,
+                offset:0.00,
+                notes:generatePattern(120, 80, 0.5)
+            },
+            hard:{
+                audio:null,
+                offset:0.00,
+                notes:generatePattern(120, 110, 0.25)
+            }
+        }
+    },
+    {
+        name:'Final Rush',
+        bpm:145,
+        difficulties:{
+            easy:{
+                audio:null,
+                offset:0.00,
+                notes:generatePattern(145, 72, 0.5)
+            },
+            normal:{
+                audio:null,
+                offset:0.00,
+                notes:generatePattern(145, 120, 0.5)
+            },
+            hard:{
+                audio:null,
+                offset:0.00,
+                notes:generatePattern(145, 160, 0.25)
+            }
+        }
+    }
+];
+
+function generatePattern(bpm, count, stepBeat){
+    const out = [];
+    const spb = 60/bpm;
+    let beat = 2;
+    for(let i=0;i<count;i++){
+        const lane = LANES[i%4];
+        out.push({time: beat*spb, lane});
+        beat += stepBeat;
+        if(i%8===7){
+            const t2 = beat*spb;
+            out.push({time:t2, lane:LANES[Math.floor(Math.random()*4)]});
+        }
+    }
+    return out;
+}
+
+/* ================= STATE ================= */
+let renderer,scene,camera,clock;
+let stats; 
+let arrows=[],pool=[];
+let laneMeshes={}, laneMirrors=[];
+let hitRings=[], hitRingGlows=[];
+let bgStars, bgGrid;
+let running=false,paused=false;
+let score=0,combo=0,bestCombo=0,hit=0,judged=0,health=1;
+let notes=[],speed;
+let currentLevelIndex=0,currentDiffKey='easy',currentEnv='neon';
+let GRAPHICS_FIDELITY = 'high'; 
+
+/* ================= UI ELEMENTS ================= */
+const el = id=>document.getElementById(id);
+const scoreEl=el('score'),comboEl=el('combo'),accEl=el('acc');
+const healthFill=el('health').firstChild;
+const judgeEl=el('judge');
+const keyEls={A:el('kA'),S:el('kS'),D:el('kD'),F:el('kF')};
+const levelSel = el('level');
+const diffSel  = el('difficulty');
+const envSel   = el('environment');
+const graphicsSel = el('graphics'); 
+const overlayDim = el('overlay-dim');
+const resultsBox = el('results');
+
+/* ================= AUDIO (TIME MASTER) ================= */
+const AudioManager = {
+    audio:null,
+    offset:0,
+    hasAudio:false,
+    baseStart:0,
+
+    async load(src){
+        this.hasAudio = !!src;
+        if(!src){
+            this.audio = null;
+            return;
+        }
+        const a = new Audio(src);
+        a.volume = parseFloat(el('vol').value);
+        await a.play().catch(()=>{});
+        a.pause();
+        a.currentTime=0;
+        this.audio=a;
+    },
+
+    play(offset=0){
+        this.offset=offset;
+        this.baseStart=performance.now()/1000;
+        if(this.audio && this.hasAudio){
+            this.audio.currentTime=0;
+            this.audio.play();
+        }
+    },
+
+    pause(){
+        if(this.audio && this.hasAudio) this.audio.pause();
+    },
+
+    resume(){
+        this.baseStart=performance.now()/1000 - this.getTime();
+        if(this.audio && this.hasAudio) this.audio.play();
+    },
+
+    stop(){
+        if(this.audio && this.hasAudio){
+            this.audio.pause();
+            this.audio.currentTime=0;
+        }
+    },
+
+    getTime(){
+        if(this.audio && this.hasAudio){
+            return this.audio.currentTime - this.offset;
+        }
+        return (performance.now()/1000 - this.baseStart) - this.offset;
+    },
+
+    setVolume(v){
+        if(this.audio && this.hasAudio) this.audio.volume=v;
+    }
+};
+
+/* ================= UI HELPERS ================= */
+function updateHUD(){
+    scoreEl.textContent='Score '+score;
+    comboEl.textContent='Combo '+combo;
+    const acc = judged ? (hit/judged*100) : 100;
+    accEl.textContent='Acc '+acc.toFixed(1)+'%';
+    healthFill.style.width=(health*100)+'%';
+}
+
+function showJudge(t){
+    judgeEl.textContent=t;
+    judgeEl.style.opacity=1;
+    setTimeout(()=>{judgeEl.style.opacity=0},400);
+}
+
+function setButtonsRunning(){
+    el('start').disabled=true;
+    el('restart').disabled=false;
+    el('pause').disabled=false;
+    el('pause').textContent='Pause';
+}
+function setButtonsStopped(){
+    el('start').disabled=false;
+    el('restart').disabled=true;
+    el('pause').disabled=true;
+    el('pause').textContent='Pause';
+}
+
+function changeHealth(delta){
+    health = Math.max(0,Math.min(1,health+delta));
+    updateHUD();
+    if(health<=0 && running){
+        endRun('fail');
+    }
+}
+
+function getRank(acc){
+    if(acc>=98)return'S';
+    if(acc>=95)return'A';
+    if(acc>=90)return'B';
+    if(acc>=80)return'C';
+    return'D';
+}
+
+function openResults(reason){
+    const lvl = LEVELS[currentLevelIndex];
+    const diffName = currentDiffKey[0].toUpperCase()+currentDiffKey.slice(1);
+    const acc = judged ? (hit/judged*100) : 0;
+    const rank = getRank(acc);
+
+    el('res-title').textContent = reason==='fail'?'FAILED':'CLEAR';
+    el('res-song').textContent  = 'Song: '+lvl.name;
+    el('res-diff').textContent  = 'Difficulty: '+diffName;
+    el('res-score').textContent = 'Score: '+score;
+    el('res-acc').textContent   = 'Accuracy: '+acc.toFixed(2)+'%';
+    el('res-best-combo').textContent = 'Max Combo: '+bestCombo;
+    el('res-rank').textContent  = 'Rank: '+rank;
+
+    overlayDim.style.display='block';
+    resultsBox.style.display='flex';
+}
+
+function closeResults(){
+    overlayDim.style.display='none';
+    resultsBox.style.display='none';
+}
+
+/* ================= SCENE HELPERS ================= */
+function canvasTex(baseColor='#1b1f3a', lineAlpha=0.08){
+    const c=document.createElement('canvas');c.width=c.height=64;
+    const g=c.getContext('2d');
+    g.fillStyle=baseColor;g.fillRect(0,0,64,64);
+    g.strokeStyle='rgba(255,255,255,'+lineAlpha+')';
+    for(let i=0;i<64;i+=8){
+        g.beginPath();g.moveTo(i,0);g.lineTo(i,64);g.stroke();
+    }
+    const texture = new THREE.CanvasTexture(c);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    return texture;
+}
+
+/* ================= SCENE INIT ================= */
+function initScene(){
+    // Setup Stats.js
+    stats = new Stats();
+    stats.showPanel(0); 
+    stats.domElement.id = 'stats';
+    document.body.appendChild(stats.domElement);
+
+    // Renderer setup (Shadows explicitly disabled for WebGL 1.0 compatibility)
+    renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    renderer.setSize(innerWidth,innerHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.shadowMap.enabled = false; // Must be false for robust WebGL 1.0 support
+    document.getElementById('canvas').appendChild(renderer.domElement);
+
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(65,innerWidth/innerHeight,0.1,400);
+    camera.position.set(0,7,16);
+    camera.lookAt(0,0,-15);
+
+    // Lights
+    const amb = new THREE.AmbientLight(0x404060, 0.8);
+    scene.add(amb);
+    const hemi = new THREE.HemisphereLight(0x88aaff, 0x202040, 0.7);
+    hemi.position.set(0,40,0);
+    scene.add(hemi);
+
+    const dir = new THREE.DirectionalLight(0xffffff, 1.1); 
+    dir.position.set(6, 18, 10);
+    scene.add(dir);
+
+    clock = new THREE.Clock();
+
+    window.addEventListener('resize',()=>{
+        camera.aspect=innerWidth/innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth,innerHeight);
+    });
+
+    buildCommonGeometry();
+    applyFidelity(graphicsSel.value);
+    applyEnvironment('neon');
+}
+
+// Reverted to Phong/Lambert materials only (no Standard/PBR)
+function getLaneMaterial(laneColor, fidelity){
+    // Use the original MeshPhongMaterial as it's the most common performant choice in WebGL 1.0
+    return new THREE.MeshPhongMaterial({
+        map: canvasTex('#1b1f3a', 0.06),
+        color: laneColor,
+        shininess: fidelity === 'low' ? 5 : 40,
+        specular: fidelity === 'low' ? 0x222222 : 0xffffff,
+        emissive: new THREE.Color(laneColor),
+        emissiveIntensity: fidelity === 'low' ? 0.2 : 0.6
+    });
+}
+
+function buildCommonGeometry(){
+    // Starfield (moving background)
+    const starGeo = new THREE.BufferGeometry();
+    const starCount = 600;
+    const starPos = new Float32Array(starCount*3);
+    for(let i=0;i<starCount;i++){
+        starPos[i*3+0] = (Math.random()*2-1)*80;
+        starPos[i*3+1] = (Math.random()*2-1)*80;
+        starPos[i*3+2] = -Math.random()*250 - 40;
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos,3));
+    const starMat = new THREE.PointsMaterial({
+        color:0xffffff,size:0.32,
+        transparent:true,opacity:0.8
+    });
+    bgStars = new THREE.Points(starGeo,starMat);
+    scene.add(bgStars);
+
+    // Distant scrolling grid (used in stellar env)
+    const gridTex = canvasTex('#101323',0.14);
+    gridTex.repeat.set(1,20);
+    // Revert to MeshPhongMaterial
+    const gridMat = new THREE.MeshPhongMaterial({
+        map:gridTex,color:0x20244a,
+        shininess:8,specular:0x203040
+    });
+    const gridPlane = new THREE.Mesh(new THREE.PlaneGeometry(40,400),gridMat);
+    gridPlane.rotation.x = -Math.PI/2;
+    gridPlane.position.set(0,-2,-120);
+    bgGrid = gridPlane;
+    scene.add(bgGrid);
+
+    // Ground: Revert to MeshPhongMaterial
+    const groundMat = new THREE.MeshPhongMaterial({
+        map: canvasTex('#1b1f3a', 0.06),
+        color: 0x15182f,
+        shininess: 60,
+        specular: 0x5555aa,
+        reflectivity: 0.4
+    });
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(200,200),groundMat);
+    ground.rotation.x=-Math.PI/2;
+    ground.position.y=-1.6;
+    ground.name='ground';
+    scene.add(ground);
+
+    // Lanes + mirrored lanes
+    for(const l of LANES){
+        const lane = new THREE.Mesh(new THREE.BoxGeometry(3.6,0.3,90));
+        lane.position.set(X[l],-1.4,-40);
+        laneMeshes[l]=lane;
+        scene.add(lane);
+
+        // mirror: MeshPhongMaterial (original)
+        const mirrorMat = new THREE.MeshPhongMaterial({
+            color:COLORS[l],
+            transparent:true,opacity:0.25,
+            shininess:10,specular:0x222244
+        });
+        const mirror = new THREE.Mesh(new THREE.BoxGeometry(3.6,0.3,90),mirrorMat);
+        mirror.position.set(X[l],-1.81,-40);
+        laneMirrors.push(mirror);
+        scene.add(mirror);
+    }
+
+    // Hit rings + glow quads
+    const ringGeo = new THREE.TorusGeometry(1.1,0.16,16,32);
+    const glowGeo = new THREE.CircleGeometry(1.5,24);
+    for(const l of LANES){
+        // Hit Rings: Revert to MeshPhongMaterial
+        const ringMat = new THREE.MeshPhongMaterial({
+            color:0xffffff,
+            shininess:80,
+            specular:0xffffff,
+            emissive: new THREE.Color(0x3b7bff),
+            emissiveIntensity: 0.6
+        });
+        const ring=new THREE.Mesh(ringGeo,ringMat);
+        ring.position.set(X[l],0,TARGET);
+        ring.rotation.x=Math.PI/2;
+        hitRings.push(ring);
+        scene.add(ring);
+
+        // Glow Quad: MeshBasicMaterial (always compliant)
+        const glowMat = new THREE.MeshBasicMaterial({
+            color:0x6ea8ff,
+            transparent:true,opacity:0.45,depthWrite:false
+        });
+        const glow = new THREE.Mesh(glowGeo,glowMat);
+        glow.position.copy(ring.position);
+        glow.rotation.x = -Math.PI/2;
+        hitRingGlows.push(glow);
+        scene.add(glow);
+    }
+
+    // Arrow pool: Revert to MeshPhongMaterial
+    const arrowGeo = new THREE.ConeGeometry(1.1,3.2,18);
+    for(let i=0;i<120;i++){
+        const m = new THREE.Mesh(arrowGeo, new THREE.MeshPhongMaterial({
+             color:0xffffff,
+             shininess:40,
+             specular:0xffffff,
+             emissive:0x111111,
+             emissiveIntensity:0.3
+        })); 
+        m.visible=false;
+        scene.add(m);
+        pool.push(m);
+    }
+
+    scene.fog = new THREE.Fog(0x050712, 30, 220);
+}
+
+function applyFidelity(fidelity){
+    GRAPHICS_FIDELITY = fidelity;
+
+    // 1. Material Changes
+    for(const l of LANES){
+        laneMeshes[l].material = getLaneMaterial(COLORS[l], fidelity);
+        laneMeshes[l].material.needsUpdate = true;
+    }
+    pool.forEach(a=>{
+        // Update Phong material properties
+        a.material.shininess = fidelity === 'low' ? 5 : 40;
+        a.material.specular.setHex(fidelity === 'low' ? 0x222222 : 0xffffff);
+        a.material.emissiveIntensity = fidelity === 'low' ? 0.1 : 0.3;
+        a.material.needsUpdate = true;
+    });
+
+    const ground = scene.getObjectByName('ground');
+    if(ground) {
+        // Update Phong material properties
+        ground.material.shininess = fidelity === 'low' ? 10 : 60;
+        ground.material.specular.setHex(fidelity === 'low' ? 0x222222 : 0x5555aa);
+        ground.material.reflectivity = fidelity === 'low' ? 0.1 : 0.4;
+        ground.material.needsUpdate = true;
+    }
+
+    // 2. Anti-aliasing Control (Web GL 1.0 standard approach)
+    // Note: We cannot rely on setting high pixel ratios on all devices for performance.
+    renderer.setPixelRatio(fidelity === 'high' ? Math.min(devicePixelRatio, 1.5) : 1.0);
+
+    // 3. Complex effects control (Bloom is removed, focusing on emissive intensity)
+    hitRings.forEach(r => {
+        r.material.emissiveIntensity = fidelity === 'low' ? 0.3 : 0.8;
+    });
+
+    // Re-apply environment colors to match new materials
+    applyEnvironment(currentEnv);
+}
+
+/* ================= ENVIRONMENTS ================= */
+function applyEnvironment(name){
+    currentEnv=name;
+    const ground = scene.getObjectByName('ground');
+
+    // Use current fidelity settings for intensity control
+    const intensity = GRAPHICS_FIDELITY === 'low' ? 0.2 : 0.6;
+    const ringIntensity = GRAPHICS_FIDELITY === 'low' ? 0.3 : 0.8;
+
+    if(name==='neon'){
+        scene.background = new THREE.Color(0x05020b);
+        scene.fog.color.set(0x05020b);
+        bgGrid.visible = false;
+
+        for(const l of LANES){
+            laneMeshes[l].material.color.setHex(COLORS[l]);
+            laneMeshes[l].material.emissive.setHex(COLORS[l]);
+            laneMeshes[l].material.emissiveIntensity = intensity; 
+        }
+
+        if(ground) ground.material.color.set(0x171d3c);
+
+        hitRings.forEach((r,i)=>{
+            r.material.color.set(0xffffff);
+            r.material.emissive.set(0x6ea8ff);
+            r.material.emissiveIntensity=ringIntensity;
+            hitRingGlows[i].material.color.set(0x6ea8ff);
+        });
+
+    } else if(name==='stellar'){
+        scene.background = new THREE.Color(0x020506);
+        scene.fog.color.set(0x020506);
+        bgGrid.visible = true;
+
+        for(const l of LANES){
+            laneMeshes[l].material.color.set(0x4cd4a5);
+            laneMeshes[l].material.emissive.set(0x25ffc6);
+            laneMeshes[l].material.emissiveIntensity = intensity;
+        }
+
+        if(ground) ground.material.color.set(0x0f1f1c);
+
+        hitRings.forEach((r,i)=>{
+            r.material.color.set(0x9dffe4);
+            r.material.emissive.set(0x39ffb9);
+            r.material.emissiveIntensity=ringIntensity;
+            hitRingGlows[i].material.color.set(0x39ffb9);
+        });
+    }
+
+    laneMirrors.forEach(m=>{
+        m.material.opacity = GRAPHICS_FIDELITY === 'low' ? 0.25 : 0.4;
+        m.material.color.set(name==='neon'?0x4a6cff:0x3fd9a4);
+    });
+}
+
+/* ================= GAME LOGIC ================= */
+function spawnArrow(note){
+    const m = pool.find(p=>!p.visible);
+    if(!m) return;
+    m.visible=true;
+    m.position.set(X[note.lane],0,SPAWN);
+    const color = new THREE.Color(COLORS[note.lane]);
+    m.material.color.set(color);
+    m.material.emissive.set(color).multiplyScalar(0.4); 
+
+    m.userData={lane:note.lane,time:note.time,judged:false};
+    arrows.push(m);
+}
+
+function judgeHit(noteTime, pressTime){
+    const d = Math.abs(noteTime-pressTime);
+    if(d<=WINDOWS.perfect) return 'Perfect';
+    if(d<=WINDOWS.great)   return 'Great';
+    if(d<=WINDOWS.good)    return 'Good';
+    if(d<=WINDOWS.miss)    return 'Miss';
+    return null;
+}
+
+function endRun(reason){
+    if(!running) return;
+    running=false;
+    AudioManager.stop();
+    setButtonsStopped();
+    openResults(reason);
+    showJudge(reason==='fail'?'FAILED':'CLEAR');
+}
+
+function loop(){
+    stats.begin();
+
+    if(!running || paused) {
+        stats.end(); 
+        requestAnimationFrame(loop);
+        return;
+    }
+    
+    const dt = clock.getDelta();
+    const t = AudioManager.getTime();
+
+    // Moving starfield
+    const pos = bgStars.geometry.attributes.position;
+    for(let i=0;i<pos.count;i++){
+        let z = pos.getZ(i);
+        z += dt * 25;
+        if(z>20) z = -260 - Math.random()*60;
+        pos.setZ(i,z);
+    }
+    pos.needsUpdate=true;
+
+    // Parallax slight camera bob
+    camera.position.y = 7 + Math.sin(t*0.7)*0.3;
+
+    // Scroll grid texture
+    if(bgGrid.visible && bgGrid.material.map){
+        bgGrid.material.map.offset.y -= dt * 0.7;
+    }
+
+    // Soft pulsing ring glow
+    hitRingGlows.forEach((g,i)=>{
+        const baseOpacity = 0.40 + Math.sin(t*2 + i)*0.06;
+        g.material.opacity = baseOpacity;
+    });
+
+    // Spawn notes
+    for(const n of notes){
+        if(!n._spawned && n.time-APPROACH<=t){
+            spawnArrow(n);
+            n._spawned = true;
+        }
+    }
+
+    // Move arrows + depth-based dimming
+    for(const a of arrows.slice()){
+        a.position.z += speed*dt;
+        const dist = Math.abs(a.position.z - TARGET);
+        const glowFactor = Math.max(0,1 - dist/35);
+        a.material.emissiveIntensity = a.material.emissiveIntensity * (0.8 + glowFactor * 0.2); // Simple range dampening
+
+        // auto miss if too late
+        if(!a.userData.judged && t - a.userData.time > WINDOWS.miss){
+            a.userData.judged=true;
+            judged++;
+            combo=0;
+            changeHealth(-0.08);
+            showJudge('Miss');
+        }
+
+        if(a.position.z>25){
+            a.visible=false;
+            arrows.splice(arrows.indexOf(a),1);
+        }
+    }
+
+    // end condition
+    const allSpawned = notes.every(n=>n._spawned);
+    const anyVisible = arrows.some(a=>a.visible);
+    if(allSpawned && !anyVisible && t>0.5){
+        endRun('clear');
+    }
+
+    // Standard renderer call (no composer)
+    renderer.render(scene, camera);
+
+    stats.end(); 
+    requestAnimationFrame(loop);
+}
+
+/* ================= START / RESET ================= */
+async function startGame(){
+    closeResults();
+    currentLevelIndex = parseInt(levelSel.value,10);
+    currentDiffKey = diffSel.value;
+
+    const lvl = LEVELS[currentLevelIndex];
+    const diff = lvl.difficulties[currentDiffKey];
+
+    arrows.length=0;
+    pool.forEach(p=>{p.visible=false;p.userData={};});
+    notes = diff.notes.map(n=>({lane:n.lane,time:n.time,_spawned:false}));
+    speed = Math.abs(SPAWN-TARGET)/APPROACH;
+
+    score=0;combo=0;bestCombo=0;hit=0;judged=0;health=1;
+    updateHUD();
+
+    await AudioManager.load(diff.audio);
+    AudioManager.play(diff.offset);
+
+    running=true;
+    paused=false;
+    clock.start();
+    setButtonsRunning();
+    showJudge('GO!');
+    // If loop is not running (e.g., paused previously), start it now.
+    if(!renderer.domElement.__animationLoopId) loop();
+}
+
+/* ================= INPUT ================= */
+window.addEventListener('keydown',e=>{
+    const map={KeyA:'A',KeyS:'S',KeyD:'D',KeyF:'F'};
+    const lane=map[e.code];
+    if(!lane || !running || paused) return;
+
+    keyEls[lane].classList.add('active');
+
+    const t = AudioManager.getTime();
+    let best=null,bd=9;
+    for(const a of arrows){
+        if(a.userData.lane===lane && !a.userData.judged){
+            const d = Math.abs(a.userData.time-t);
+            if(d<bd){bd=d;best=a;}
+        }
+    }
+    if(!best) return;
+
+    const result = judgeHit(best.userData.time,t);
+    if(!result) return;
+
+    best.userData.judged=true;
+    judged++;
+
+    if(result==='Perfect' || result==='Great' || result==='Good'){
+        hit++;
+        combo++;
+        if(combo>bestCombo) bestCombo=combo;
+        let base,hp;
+        if(result==='Perfect'){base=1000;hp=0.045;}
+        else if(result==='Great'){base=700;hp=0.03;}
+        else {base=400;hp=0.015;}
+        score += base + combo*10;
+        changeHealth(hp);
+
+        // brief hit ring glow flash
+        const idx = LANES.indexOf(lane);
+        if(idx>=0){
+            hitRingGlows[idx].material.opacity = 0.85;
+            hitRings[idx].material.emissiveIntensity = GRAPHICS_FIDELITY === 'low' ? 1.0 : 1.5;
+            setTimeout(()=>{
+                hitRings[idx].material.emissiveIntensity = GRAPHICS_FIDELITY === 'low' ? 0.3 : 0.8;
+            },80);
+        }
+    }else{
+        combo=0;
+        changeHealth(-0.1);
+    }
+    showJudge(result);
+    updateHUD();
+});
+
+window.addEventListener('keyup',e=>{
+    const map={KeyA:'A',KeyS:'S',KeyD:'D',KeyF:'F'};
+    const lane=map[e.code];
+    if(lane) keyEls[lane].classList.remove('active');
+});
+
+/* ================= UI EVENTS ================= */
+levelSel.innerHTML='';
+LEVELS.forEach((l,i)=>{
+    const o=document.createElement('option');
+    o.value=i;o.textContent=l.name;
+    levelSel.appendChild(o);
+});
+levelSel.value=0;
+
+diffSel.onchange = ()=>{currentDiffKey = diffSel.value;};
+envSel.onchange  = ()=>applyEnvironment(envSel.value);
+graphicsSel.onchange = ()=>applyFidelity(graphicsSel.value);
+
+el('start').onclick   = ()=>{ if(!running) startGame(); };
+el('restart').onclick = ()=>{ startGame(); };
+el('pause').onclick   = ()=>{
+    if(!running) return;
+    paused=!paused;
+    if(paused){
+        AudioManager.pause();
+        clock.stop();
+        el('pause').textContent='Resume';
+        showJudge('Paused');
+    }else{
+        AudioManager.resume();
+        clock.start();
+        el('pause').textContent='Pause';
+        showJudge('GO!');
+        loop();
+    }
+};
+
+el('vol').addEventListener('input',()=>{
+    AudioManager.setVolume(parseFloat(el('vol').value));
+});
+
+el('res-restart').onclick = ()=>{ closeResults(); startGame(); };
+
+/* ================= INIT ================= */
+initScene();
+updateHUD();
+showJudge('Select level & Start');
+
+})();
+</script>
+</body>
+</html>
