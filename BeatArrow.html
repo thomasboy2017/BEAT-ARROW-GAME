@@ -1,221 +1,219 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF‑8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>WebGL Drum & Bass Rhythm Game</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ultimate WebGL Rhythm Game</title>
 <style>
-html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#050712;color:#fff;font-family:system-ui;}
-#canvas{position:absolute;inset:0;}
-.panel{background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);border-radius:12px;border:1px solid rgba(255,255,255,0.08);padding:8px;z-index:5;}
-#top{position:fixed;top:10px;left:10px;right:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
-#hud{position:fixed;bottom:10px;left:10px;right:10px;display:flex;gap:12px;align-items:center;}
-#judge{position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);font-size:32px;font-weight:900;opacity:0;transition:.3s;pointer-events:none;}
-.key{width:48px;height:48px;border-radius:12px;background:#1b2138;border:2px solid #2d3b66;display:flex;align-items:center;justify-content:center;font-weight:900;transition:.1s;}
-.key.active{background:#3b7bff;border-color:#9ec5ff;box-shadow:0 0 14px #7db1ff;}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#050712;color:#fff;font-family:system-ui;}
+#canvas{position:fixed;inset:0;}
+.panel{
+    background:rgba(0,0,0,0.45);
+    backdrop-filter:blur(6px);
+    border-radius:14px;
+    border:1px solid rgba(255,255,255,.08);
+    padding:10px;
+}
+#menu{position:fixed;top:10px;left:10px;z-index:10;}
+#menu button, #menu select{margin-right:8px;padding:6px 12px;border-radius:8px;background:#3b7bff;color:#fff;border:none;cursor:pointer;}
+#hud{position:fixed;bottom:10px;left:10px;z-index:10;display:flex;gap:10px;align-items:center;}
+#hud div{padding:6px 12px;background:rgba(0,0,0,0.5);border-radius:8px;}
+#keys{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);display:flex;gap:16px;}
+.key{width:52px;height:52px;border-radius:12px;background:#1b2138;border:2px solid #2d3b66;display:flex;align-items:center;justify-content:center;font-weight:900;transition:.08s;}
+.key.active{background:#3b7bff;border-color:#9ec5ff;box-shadow:0 0 18px #7db1ff;}
+#judge{position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);font-size:32px;font-weight:900;padding:12px 18px;border-radius:16px;background:rgba(0,0,0,0.6);opacity:0;transition:.15s;pointer-events:none;z-index:10;}
+#menuToggle{position:fixed;top:10px;right:10px;padding:6px 12px;background:#ff3b3b;color:#fff;border:none;border-radius:8px;cursor:pointer;z-index:11;}
+#levelBanner{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:10px 20px;font-size:24px;font-weight:900;background:rgba(50,50,50,0.7);border-radius:12px;opacity:0;transition:opacity .4s;z-index:12;}
 </style>
 </head>
 <body>
-
 <div id="canvas"></div>
 
-<div id="top" class="panel">
-  <select id="level"></select>
-  <select id="difficulty">
-    <option value="easy">Easy</option><option value="normal">Normal</option><option value="hard">Hard</option>
-  </select>
-  <select id="environment"><option value="neon">Neon</option><option value="stellar">Stars</option></select>
-  <button id="start">Start</button>
-  <button id="pause" disabled>Pause</button>
-  <button id="restart" disabled>Restart</button>
-  <input id="vol" type="range" min="0" max="1" step="0.01" value="0.8">
+<div id="menu" class="panel">
+    <button id="startBtn">Start</button>
+    <button id="pauseBtn">Pause</button>
+    <button id="fullscreenBtn">Fullscreen</button>
+    <select id="levelSel"></select>
+    <select id="graphicsSel">
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high" selected>High</option>
+    </select>
 </div>
 
-<div id="hud" class="panel">
-  <div id="score">Score 0</div>
-  <div id="combo">Combo 0</div>
-  <div id="acc">Acc 100%</div>
+<button id="menuToggle">X</button>
+
+<div id="hud">
+    <div id="score">Score: 0</div>
+    <div id="combo">Combo: 0</div>
+    <div id="acc">Acc: 100%</div>
+</div>
+
+<div id="keys">
+    <div class="key" id="kA">A</div>
+    <div class="key" id="kS">S</div>
+    <div class="key" id="kD">D</div>
+    <div class="key" id="kF">F</div>
 </div>
 
 <div id="judge">READY</div>
-
-<div id="keys" style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);display:flex;gap:12px;">
-  <div class="key" id="kA">A</div><div class="key" id="kS">S</div>
-  <div class="key" id="kD">D</div><div class="key" id="kF">F</div>
-</div>
+<div id="levelBanner">LEVEL 1</div>
 
 <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
 <script>
 (() => {
-'use strict';
+"use strict";
 
-/* ================= SETTINGS ================= */
-const LANES = ['A','S','D','F'], X = {A:-6,S:-2,D:2,F:6};
-const SPAWN=-80, TARGET=-5, APPROACH=2;
-const WINDOWS = {perfect:0.045,great:0.09,good:0.15,miss:0.21};
-
-/* ===== SHORT BASE64 DRUM & BASS LOOP ===== */
-/* (8‑second drum loop encoded as MP3) */
-const BASE64_MP3_LOOP =
-  "data:audio/mp3;base64," +
-  "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU2LjM2LjEwMAAAAAAAAAAAAAAA//tQxAADBZWFz" +
-  "ZGlyZWNvZGUAAAAAAExBTkYAAAACAAADSAAAAAEASAAA/9sAQwAEBAMFBAMFBQUGBwwGCQgHBwcH" +
-  "CQsKCgsKCgsMCwwMDAwODg4QDw8PDxAPEA8QEBAPDw8PEA8PDxAPDw8PDxAPDw8PDxAPDw//sQxA" +
-  "ADBZWFzZGVy… (TRUNCATED for brevity — embed full base64 audio)";
-
-/* =============== GAME STATE =============== */
-const LEVELS = [
-  {name:'Bass Intro', bpm:120, notes:[]},
-  {name:'Neon Groove', bpm:140, notes:[]},
-  {name:'Star Drift', bpm:160, notes:[]},
-  {name:'Pulse Ride', bpm:175, notes:[]},
-  {name:'Final Break', bpm:180, notes:[]}
-];
-
-function generatePattern(bpm, count, step) {
-  const out=[]; const spb = 60/bpm;
-  let beat = 2;
-  for(let i=0;i<count;i++){
-    const lane = LANES[Math.floor(Math.random()*LANES.length)];
-    out.push({time:beat*spb,lane});
-    beat += step;
-  }
-  return out;
-}
-LEVELS.forEach(l=>{l.notes = generatePattern(l.bpm, 80, 0.5);});
-
-/* =============== SCENE =============== */
+const LANES=['A','S','D','F'],X={A:-6,S:-2,D:2,F:6};
+const SPAWN=-80,TARGET=-5,APPROACH=2.0;
+const WINDOWS={perfect:0.045,great:0.09,good:0.15,miss:0.21};
 let renderer,scene,camera,clock;
-let arrows=[],pool=[],laneMeshes={},hitRings=[];
-let running=false,paused=false,score=0,combo=0,bestCombo=0,hitCount=0,judged=0,notes=[],health=1;
-let currentLevelIndex=0,currentDiffKey='easy',currentEnv='neon';
+let arrows=[],pool=[],hitRings=[],laneMeshes=[];
+let running=false,paused=false,score=0,combo=0,hit=0,judged=0,health=1;
+let notes=[],speed=1,FPS_LIMIT=300,lastFrame=0,GRAPHICS_FIDELITY='high',currentLevelIndex=0;
 
+const el=id=>document.getElementById(id);
+const scoreEl=el('score'),comboEl=el('combo'),accEl=el('acc');
+const judgeEl=el('judge'),levelBanner=el('levelBanner');
+const keyEls={A:el('kA'),S:el('kS'),D:el('kD'),F:el('kF')};
+const levelSel=el('levelSel'),graphicsSel=el('graphicsSel');
+const menu=el('menu'),menuToggle=el('menuToggle');
+
+const LEVELS=[
+    {name:'Neon Pulse', bpm:160, notes:genPattern(16)},
+    {name:'Star Rush', bpm:170, notes:genPattern(20)},
+    {name:'Galactic Flow', bpm:175, notes:genPattern(24)},
+    {name:'Hyper Beats', bpm:180, notes:genPattern(28)},
+    {name:'Cosmic Drop', bpm:190, notes:genPattern(32)}
+];
+LEVELS.forEach((l,i)=>{const o=document.createElement('option');o.value=i;o.textContent=l.name;levelSel.appendChild(o);});
+function genPattern(count){const out=[];let beat=0;for(let i=0;i<count;i++){out.push({time:beat,lane:LANES[i%4]});beat+=0.5;}return out;}
+
+// ===== INIT SCENE =====
 function initScene(){
-  renderer=new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth,window.innerHeight);
-  document.getElementById('canvas').appendChild(renderer.domElement);
+    renderer=new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(window.innerWidth,window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
+    document.getElementById('canvas').appendChild(renderer.domElement);
 
-  scene=new THREE.Scene();
-  camera=new THREE.PerspectiveCamera(65,window.innerWidth/window.innerHeight,0.1,400);
-  camera.position.set(0,7,16);camera.lookAt(0,0,-15);
-  clock=new THREE.Clock();
+    scene=new THREE.Scene();
+    scene.background=new THREE.Color(0x050712);
+    camera=new THREE.PerspectiveCamera(65,window.innerWidth/window.innerHeight,0.1,400);
+    camera.position.set(0,7,16);
+    camera.lookAt(0,0,-15);
 
-  const amb=new THREE.AmbientLight(0x404060,0.8);
-  scene.add(amb);
+    clock=new THREE.Clock();
 
-  // ground
-  const ground=new THREE.Mesh(new THREE.PlaneGeometry(200,200),
-    new THREE.MeshPhongMaterial({color:0x15182f}));
-  ground.rotation.x=-Math.PI/2;
-  ground.position.y=-1.6;
-  scene.add(ground);
+    const amb=new THREE.AmbientLight(0x404060,0.8);
+    scene.add(amb);
+    const dir=new THREE.DirectionalLight(0xffffff,1);
+    dir.position.set(6,18,10);
+    scene.add(dir);
 
-  // lanes
-  for(const l of LANES){
-    const lane=new THREE.Mesh(
-      new THREE.BoxGeometry(3.6,0.3,90),
-      new THREE.MeshPhongMaterial({color:COLORS[l]||0xffffff})
-    );
-    lane.position.set(X[l],-1.4,-40);
-    laneMeshes[l]=lane;
-    scene.add(lane);
+    // Lanes + hit rings
+    for(const l of LANES){
+        const laneGroup=new THREE.Group();
+        for(let i=0;i<90;i+=3){
+            const hue=(LANES.indexOf(l)*90 + i)%360;
+            const mat=new THREE.MeshPhongMaterial({color:new THREE.Color(`hsl(${hue},70%,40%)`),emissive:0x111111});
+            const box=new THREE.Mesh(new THREE.BoxGeometry(3.6,0.3,3),mat);
+            box.position.set(X[l],-1.4,-45+i);
+            laneGroup.add(box);
+        }
+        scene.add(laneGroup);
+        laneMeshes.push(laneGroup);
 
-    const ring=new THREE.Mesh(
-      new THREE.TorusGeometry(1.1,0.16,16,32),
-      new THREE.MeshPhongMaterial({emissive:0x6ea8ff,shininess:80})
-    );
-    ring.position.set(X[l],0,TARGET);
-    ring.rotation.x=Math.PI/2;
-    hitRings.push(ring);
-    scene.add(ring);
-  }
-
-  // arrow pool
-  const arrowGeo=new THREE.ConeGeometry(1.1,3.2,16);
-  for(let i=0;i<120;i++){
-    const m=new THREE.Mesh(arrowGeo,new THREE.MeshPhongMaterial({color:0xffffff}));
-    m.visible=false;
-    scene.add(m);
-    pool.push(m);
-  }
-
-  window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth,window.innerHeight);});
-}
-initScene();
-
-/* =============== AUDIO =============== */
-const AudioManager={
-  audio:new Audio(BASE64_MP3_LOOP),
-  play(){this.audio.currentTime=0;this.audio.play()},
-  pause(){this.audio.pause()},
-  resume(){this.audio.play()},
-  stop(){this.audio.pause();this.audio.currentTime=0},
-  getTime(){return this.audio.currentTime}
-};
-
-/* =============== GAME LOOP =============== */
-function spawnArrow(note){
-  const m=pool.find(p=>!p.visible);
-  if(!m)return;
-  m.visible=true;
-  m.position.set(X[note.lane],0,SPAWN);
-  m.userData={lane:note.lane,time:note.time,judged:false};
-  arrows.push(m);
-}
-function updateArrows(dt){
-  const speed=Math.abs(SPAWN-TARGET)/APPROACH;
-  for(let i=arrows.length-1;i>=0;i--){
-    const a=arrows[i];
-    a.position.z+=speed*dt;
-    if(a.position.z>TARGET+2 && !a.userData.judged){
-      a.userData.judged=true;
-      arrows.splice(i,1);
-      pool.push(a);
-      combo=0;judged++;health-=0.1;
+        const ringMat=new THREE.MeshPhongMaterial({color:new THREE.Color(`hsl(${LANES.indexOf(l)*90},100%,70%)`),emissive:new THREE.Color(`hsl(${LANES.indexOf(l)*90},100%,50%)`),shininess:80});
+        const ring=new THREE.Mesh(new THREE.TorusGeometry(1.2,0.15,16,32),ringMat);
+        ring.position.set(X[l],0,TARGET);
+        ring.rotation.x=Math.PI/2;
+        hitRings.push(ring);
+        scene.add(ring);
     }
-  }
+
+    // Star background
+    for(let i=0;i<150;i++){
+        const star=new THREE.Mesh(new THREE.SphereGeometry(0.1,4,4),new THREE.MeshBasicMaterial({color:0xffffff}));
+        star.position.set((Math.random()-0.5)*40,Math.random()*20,(Math.random()-0.5)*60-10);
+        scene.add(star);
+    }
+
+    window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth,window.innerHeight);});
+}
+
+// ===== GAME =====
+function startGame(){
+    currentLevelIndex=parseInt(levelSel.value,10);
+    const lvl=LEVELS[currentLevelIndex];
+    notes=lvl.notes.map(n=>({...n,_spawned:false}));
+    arrows.length=0; pool.length=0;
+    speed=Math.abs(SPAWN-TARGET)/APPROACH;
+    score=combo=hit=judged=0;health=1;
+    updateHUD(); showJudge("GO!"); showLevelBanner(lvl.name);
+    running=true; paused=false; clock.start(); loop();
+}
+function showLevelBanner(name){levelBanner.textContent=name;levelBanner.style.opacity=1;setTimeout(()=>{levelBanner.style.opacity=0;},1500);}
+function updateHUD(){scoreEl.textContent='Score: '+score;comboEl.textContent='Combo: '+combo;const acc=judged? hit/judged*100:100;accEl.textContent='Acc: '+acc.toFixed(1)+'%';}
+function showJudge(txt){judgeEl.textContent=txt; judgeEl.style.opacity=1; setTimeout(()=>{judgeEl.style.opacity=0;},400);}
+
+// ===== INPUT =====
+window.addEventListener('keydown',e=>{
+    const map={KeyA:'A',KeyS:'S',KeyD:'D',KeyF:'F'};
+    const lane=map[e.code]; if(!lane||!running||paused) return;
+    keyEls[lane].classList.add('active');
+    const t=clock.getElapsedTime(); let best=null,bd=9;
+    for(const a of arrows){if(a.userData.lane===lane&&!a.userData.judged){const d=Math.abs(a.userData.time-t);if(d<bd){bd=d;best=a;}}}
+    if(!best) return;
+    const d=Math.abs(best.userData.time-t); let res='Miss';
+    if(d<=WINDOWS.perfect) res='Perfect'; else if(d<=WINDOWS.great) res='Great'; else if(d<=WINDOWS.good) res='Good';
+    best.userData.judged=true; judged++;
+    if(res!=='Miss'){hit++; combo++; score+=100+combo*10; const ring=hitRings[LANES.indexOf(lane)]; ring.scale.set(1.5,1.5,1.5); setTimeout(()=>{ring.scale.set(1,1,1);},150);} else combo=0;
+    showJudge(res); updateHUD();
+});
+window.addEventListener('keyup',e=>{const map={KeyA:'A',KeyS:'S',KeyD:'D',KeyF:'F'};const lane=map[e.code];if(lane) keyEls[lane].classList.remove('active');});
+
+// ===== SPAWN & LOOP =====
+function spawnArrow(note){
+    const arrow=new THREE.Mesh(new THREE.ConeGeometry(1.1,3.2,18),new THREE.MeshPhongMaterial({color:0xffffff,emissive:0x111111,emissiveIntensity:0.3}));
+    arrow.position.set(X[note.lane],0,SPAWN);
+    arrow.userData={lane:note.lane,time:note.time,judged:false,bounce:0};
+    arrows.push(arrow); scene.add(arrow); pool.push(arrow);
 }
 function loop(){
-  const dt=clock.getDelta();
-  if(running&&!paused){
-    const t=AudioManager.getTime();
-    while(notes.length && notes[0].time<=t+APPROACH){
-      spawnArrow(notes.shift());
+    requestAnimationFrame(loop);
+    const now=performance.now();
+    if(now-lastFrame<1000/FPS_LIMIT) return; lastFrame=now;
+    const dt=clock.getDelta(); const t=clock.getElapsedTime();
+
+    for(const n of notes){if(!n._spawned && n.time-APPROACH<=t){ spawnArrow(n); n._spawned=true; }}
+
+    for(const a of arrows.slice()){
+        a.position.z+=speed*dt;
+        a.position.y=Math.sin((SPAWN-a.position.z)/5)*0.6;
+        if(!a.userData.judged && t-a.userData.time>WINDOWS.miss){ a.userData.judged=true; judged++; combo=0; showJudge("Miss"); updateHUD(); }
+        if(a.position.z>25){ scene.remove(a); arrows.splice(arrows.indexOf(a),1); }
     }
-    updateArrows(dt);
-  }
-  renderer.render(scene,camera);
-  requestAnimationFrame(loop);
+
+    hitRings.forEach(r=>{r.scale.x=1+0.2*Math.sin(t*5); r.scale.y=1+0.2*Math.sin(t*5); r.scale.z=1+0.2*Math.sin(t*5);});
+    laneMeshes.forEach((laneGroup,i)=>{
+        laneGroup.children.forEach((box,j)=>{
+            box.material.color.setHSL((i*0.25+j*0.01+Math.sin(t)*0.05)%1,0.7,0.4);
+        });
+    });
+
+    renderer.render(scene,camera);
 }
-loop();
 
-/* =============== INPUT =============== */
-document.addEventListener('keydown',e=>{
-  const m={KeyA:'A',KeyS:'S',KeyD:'D',KeyF:'F'}[e.code];
-  if(!m||!running||paused)return;
-  keyEls[m].classList.add('active');
-  const t=AudioManager.getTime();
-  for(let i=0;i<arrows.length;i++){
-    const a=arrows[i];
-    if(a.userData.lane===m&&!a.userData.judged){
-      const d=Math.abs(a.position.z-TARGET);
-      if(d<=WINDOWS.miss){
-        a.userData.judged=true;arrows.splice(i,1);pool.push(a);
-        judged++;hitCount++;
-      }
-    }
-  }
-});
-document.addEventListener('keyup',e=>{const m={KeyA:'A',KeyS:'S',KeyD:'D',KeyF:'F'}[e.code];if(m)keyEls[m].classList.remove('active');});
+// ===== UI EVENTS =====
+el('startBtn').onclick=startGame;
+el('pauseBtn').onclick=()=>{paused=!paused; if(paused) clock.stop(); else clock.start();};
+el('fullscreenBtn').onclick=()=>{if(!document.fullscreenElement) renderer.domElement.requestFullscreen();};
+menuToggle.onclick=()=>{menu.style.display=menu.style.display==='none'?'block':'none';};
 
-/* =============== UI =============== */
-LEVELS.forEach((lvl,i)=>{const o=document.createElement('option');o.value=i;o.textContent=lvl.name;levelSel.appendChild(o);});
-el('start').onclick=()=>{notes=LEVELS[currentLevelIndex].notes.slice();running=true;AudioManager.play();};
-el('pause').onclick=()=>{paused=!paused;(paused?AudioManager.pause():AudioManager.resume());};
-el('restart').onclick=()=>{runnerunning=false;notes=LEVELS[currentLevelIndex].notes.slice();AudioManager.play();running=true;};
+// ===== INIT =====
+initScene(); updateHUD(); showJudge("READY");
 
 })();
 </script>
-
 </body>
 </html>
